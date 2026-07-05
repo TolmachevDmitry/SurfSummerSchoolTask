@@ -1,4 +1,4 @@
-# План реализации FE для «Кулинарной студии»
+# План реализации FE для «Кулинарная студия»
 
 > Парный документ к [BE_IMPLEMENTATION_PLAN.md](./BE_IMPLEMENTATION_PLAN.md).
 > Контракт API — `01-analysis/api/openapi.yaml` (авторитетный). ТЗ экранов — `01-analysis/5-mobile-app-spec/`.
@@ -29,20 +29,21 @@
 ## Стек приложения
 
 - Платформа и рантайм: React Native (Expo managed workflow), единая кодовая база iOS/Android (NFR-001).
-- Язык: TypeScript (strict).
+- Язык: JavaScript (ES2022+, JSX); без TypeScript.
 - Навигация: React Navigation v7 — `Native-Stack` для авторизованного стека и потока бронирования, `Bottom-Tabs` для главного таб-бара (расписание / мои брони / история / профиль).
 - Серверное состояние: TanStack Query (React Query) — кэш, инвалидация, `loading/error`-состояния, refetchOnFocus для актуальности `available_seats` (NFR-015, NFR-018).
 - Клиентское состояние: Zustand для сессии (token, profile, isAuthed) и UI-флагов; без глобальных redux-слоёв.
-- HTTP: `fetch`-обёртка с base URL из env, Bearer-перехватчиком, единым маппером ошибок, таймаутом; AbortController для отмен.
-- Контракт: генерация TS-типов и типобезопасного клиента из `openapi.yaml` (openapi-typescript + openapi-fetch либо hey-api); ручное редактирование сгенерированного кода запрещено.
+- HTTP: `fetch`-обёртка с base URL из env, Bearer-перехватчиком, единым маппером ошибок, таймаутом; `AbortController` для отмен.
+- Контракт: OpenAPI (`openapi.yaml`) — источник истины; из него поднимается mock-сервер (по example-ответам) для локальной разработки/тестов и генерируется JS-клиент (либо hand-written обёртка, сверяемая с примерами). Генерации TS-типов нет; ручное редактирование сгенерированного кода запрещено.
+- Рантайм-валидация: `zod`-схемы (описываются вручную по OpenAPI-контракту) компенсируют отсутствие статических типов — валидируют ответы API и ввод форм.
 - Защищённое хранилище: `expo-secure-store` (iOS Keychain / Android Keystore) — только `auth_token` и `auth_profile` (LOGIC-001, NFR-008). Платёжных реквизитов не хранить.
-- Формы и валидация: `react-hook-form` + `zod` (схемы из сгенерированных типов).
+- Формы и валидация: `react-hook-form` + `zod`.
 - Платежи: токенизация карты внешним SDK, определяемым бэкенд-платёжной инфраструктурой (CON-003, NFR-008); FE получает `cardToken` и передаёт его в `createBooking`. Возврат средств FE не инициирует (статус `refunded` ставит бэкенд).
 - Уведомления: `expo-notifications` для приёма push; deep link ведёт на SCR-009 (FR-020/021/022).
 - UI/тема: единая design system из дизайн-брифов `01-analysis/3-design-brief/`; токены темы (цвета, типографика, радиусы) вынесены в `app/theme`.
 - Локализация: статический русский словарь (CON-009/NFR-002), без i18n-фреймворка.
-- Тесты: Jest + React Native Testing Library (unit/component), Detox или Playwright RN (e2e) для ключевых потоков auth/booking/cancel/rating.
-- Окружение: Expo + EAS Build; конфигурация через `app.config.ts` + `.env` (`API_BASE_URL`, и т.д.); mock-сервер на основе OpenAPI для локальной и тестовой разработки.
+- Тесты: Jest + React Native Testing Library (unit/component), Detox или Maestro (e2e) для ключевых потоков auth/booking/cancel/rating.
+- Окружение: Expo + EAS Build; конфигурация через `app.config.js` + `.env` (`API_BASE_URL`, и т.д.); mock-сервер на основе OpenAPI для локальной и тестовой разработки.
 
 ## Функционал и endpoints
 
@@ -65,13 +66,13 @@
 | Ratings | `createRating` | `POST /bookings/{bookingId}/rating` | SCR-011, LOGIC-008 | Оценка (1–5) + опциональный отзыв |
 | Notifications | `getNotifications` | `GET /notifications` | (опц., центр уведомлений) | Только чтение push-истории |
 
-> Примечание: аллергии управляются через `PATCH /profile` и автоматически попадают в новые брони бэкендом (FR-027). Отдельных клиентских эндпоинтов `/me/allergies` или `/bookings/{id}/allergies` в контракте нет — руководствуемся OpenAPI.
+> Примечание: аллергии управляются через `PATCH /profile` и автоматически попадают в новые брони бэкендом (FR-027). Отдельных клиентских эндпоинтов `/me/allergies` или `/bookings/{id}/allergies` в контракте нет — руководствуемся OpenAPI (расхождение с таблицей покрытия в README ТЗ).
 > `GET /notifications` не покрывается явным экраном в MVP; включается опционально при появлении центра уведомлений.
 
 ## Правила для ralph loop
 
 - Один пункт ниже = одна итерация: взять контекст, реализовать минимальный вертикальный срез (экран + его запрос/логика + навигация), добавить/обновить тесты, прогнать указанную проверку.
-- Любое изменение публичного API начинается с правки `01-analysis/api/openapi.yaml` и проверки линтом контракта; затем перегенерируются TS-типы.
+- Любое изменение публичного API начинается с правки `01-analysis/api/openapi.yaml` и проверки линтом контракта; затем актуализируются mock-сервер и JS-клиент.
 - Приложение — строго read-only консьюмер API (CON-001, NFR-003): никакие справочные сущности не вычисляются и не кэшируются как источник истины; `available_seats` и `availableRentalKits` всегда берутся из свежего ответа (NFR-015).
 - Атомарность брони и порог 10 минут гарантирует бэкенд (CON-002, CON-006, NFR-013); FE лишь блокирует UI как вспомогательную меру и корректно обрабатывает `409/410`.
 - Не реализовывать: админ/шеф-интерфейсы, CRUD расписания, own-acquiring, лист ожидания, групповые брони, редактирование/удаление отзывов, настройки уведомлений, мультиязычность/мультивалютность.
@@ -81,14 +82,14 @@
 ### Слои
 
 - **app/** — ядро приложения: точка входа, провайдеры (QueryClient, Navigation, Toast), тема, конфиг env, навигационные графы.
-- **features/** — вертикальные срезы по доменам ТЗ: `auth`, `schedule`, `slot`, `chef`, `booking-setup`, `payment`, `my-bookings`, `booking-details`, `history`, `rating`, `profile`. Каждый фичамодуль содержит `api.ts` (через типобезопасный клиент), `hooks.ts` (React Query), `screens/`, `components/`, `schema.ts` (zod).
+- **features/** — вертикальные срезы по доменам ТЗ: `auth`, `schedule`, `slot`, `chef`, `booking-setup`, `payment`, `my-bookings`, `booking-details`, `history`, `rating`, `profile`. Каждый фичамодуль содержит `api.js` (через клиент), `hooks.js` (React Query), `screens/`, `components/`, `schema.js` (zod).
 - **shared/** — переиспользуемое: HTTP-клиент, secure-storage-обёртка, session-store (Zustand), error-mapper, форматтеры дат/цен, UI-кит (кнопки, карточки, радио, лоадеры, empty/error-состояния), строки русского словаря.
-- **api/** — только сгенерированные из OpenAPI типы и клиент (не редактировать вручную).
+- **api/** — клиент и mock-фикстуры, произведённые из OpenAPI (генерируемая часть не правится вручную); рядом — zod-схемы ответов по операциям.
 
 ### Поток данных
 
-`Screen → hook (React Query) → типобезопасный клиент (api/) → fetch-обёртка (shared/http)`.
-Сетевой слой добавляет `Authorization`, единообразно маппит `ErrorResponse` (`reason`/`message`) и перехватывает `401` → session-store сбрасывает сессию, навигация переключает на SCR-001 (LOGIC-001, AC-003).
+`Screen → hook (React Query) → клиент (api/) → fetch-обёртка (shared/http)`.
+Сетевой слой добавляет `Authorization`, единообразно маппит `ErrorResponse` (`reason`/`message`), по желанию прогоняет ответ через zod-схему и перехватывает `401` → session-store сбрасывает сессию, навигация переключает на SCR-001 (LOGIC-001, AC-003).
 
 ### Навигация
 
@@ -104,18 +105,18 @@
 ```
 mobile/
 ├── app/
-│   ├── App.tsx                 # провайдеры + root navigator
+│   ├── App.jsx                 # провайдеры + root navigator
 │   ├── navigation/
-│   │   ├── RootNavigator.tsx   # auth vs app switching
-│   │   ├── AppTabs.tsx         # SCR-002/008/010/012
-│   │   ├── BookingStack.tsx    # SCR-003/005/006/007
-│   │   └── links.ts            # deep link config → SCR-009
+│   │   ├── RootNavigator.jsx   # auth vs app switching
+│   │   ├── AppTabs.jsx         # SCR-002/008/010/012
+│   │   ├── BookingStack.jsx    # SCR-003/005/006/007
+│   │   └── links.js            # deep link config → SCR-009
 │   ├── theme/                  # токены дизайна из 3-design-brief
-│   ├── env.ts                  # API_BASE_URL и др.
+│   ├── env.js                  # API_BASE_URL и др.
 │   └── providers/              # QueryClient, Toast, Notifications
-├── api/                        # ⚙ сгенерировано из openapi.yaml (не править)
-│   ├── types.ts
-│   └── client.ts
+├── api/                        # ⚙ клиент и mock-фикстуры из openapi.yaml (не править вручную)
+│   ├── client.js
+│   └── mock/                   # example-фикстуры по операциям
 ├── features/
 │   ├── auth/                   # SCR-001, LOGIC-001
 │   ├── schedule/               # SCR-002, LOGIC-002/003
@@ -134,10 +135,10 @@ mobile/
 │   ├── errors/                 # error-mapper по reason-кодам
 │   ├── format/                 # даты, цена (₽), длительность
 │   ├── ui/                     # кнопки, карточки, радио, states
-│   └── i18n/ru.ts              # русский словарь строк (CON-009)
-├── e2e/                        # Detox/Playwright потоки
-├── tests/                      # shared утилиты тестов, мс_swagger_mock
-├── app.config.ts
+│   └── i18n/ru.js              # русский словарь строк (CON-009)
+├── e2e/                        # Detox/Maestro потоки
+├── tests/                      # shared утилиты тестов, MSW/mock
+├── app.config.js
 ├── .env.example
 └── package.json
 ```
@@ -147,37 +148,37 @@ mobile/
 ### FE-00. Создать каркас React Native-приложения
 
 Сделать:
-- Инициализировать `mobile/` на Expo + TypeScript (strict), настроить `eslint`, `prettier`, `tsc --noEmit`.
-- Настроить `app.config.ts`, `env.ts` (`API_BASE_URL`), `.env.example`; подключить дизайн-токены из `01-analysis/3-design-brief/`.
-- Поднять провайдеры: QueryClient, Toast/Snackbar, кастомная `Base-StyleSheet`.
+- Инициализировать `mobile/` на Expo + JavaScript (JSX), настроить `eslint`, `prettier`.
+- Настроить `app.config.js`, `env.js` (`API_BASE_URL`), `.env.example`; подключить дизайн-токены из `01-analysis/3-design-brief/`.
+- Поднять провайдеры: QueryClient, Toast/Snackbar, базовый `StyleSheet`.
 - Создать навигационный скелет: `RootNavigator` (заглушки `AuthStack`/`AppTabs`/`BookingStack`), таб-бар из 4 пунктов, пока на пустых экранах-плейсхолдерах.
 - Настроить запуск unit/component-тестов (Jest + RNTL) и e2e-раннер.
 
 Готово, когда:
-- `npm run lint`, `npm run typecheck`, `npm test` проходят.
+- `npm run lint`, `npm test` проходят.
 - Приложение стартует на iOS/Android (симулятор/устройство) и показывает таб-бар с 4 заглушками.
 
 ### FE-01. Подключить OpenAPI как контракт
 
 Сделать:
-- Настроить codegen TS-типов и типобезопасного клиента из `01-analysis/api/openapi.yaml` (сохраняя `operationId`).
-- Завести скрипт генерации в `package.json` и зафиксировать, что `api/` не правится вручную.
-- Настроить локальный mock-сервер по контракту (на примерах OpenAPI) для разработки без бэкенда.
+- Принять `01-analysis/api/openapi.yaml` как единый контракт: на его основе поднять mock-сервер (по example-ответам) для разработки без бэкенда и подготовить JS-клиент (сгенерированный либо hand-written `fetch`-обёртку), повторяющий `operationId`.
+- Завести скрипт codegen/мока в `package.json`; зафиксировать, что сгенерированная часть `api/` не правится вручную.
+- Описать zod-схемы ответов для ключевых операций (`login`, `getSlots`, `getSlotById`, `createBooking`) по контракту.
 
 Готово, когда:
 - Линт OpenAPI-контракта проходит.
-- `npm run codegen` воспроизводимо генерирует типы; они используются в первом запросе (например, `login`).
-- `npm run typecheck` проходит.
+- Mock-сервер отвечает на первый запрос (например, `login`) по примеру из контракта.
+- `npm run lint` проходит.
 
 ### FE-02. Реализовать общую инфраструктуру (HTTP, сессия, ошибки, тема)
 
 Сделать:
-- `shared/http`: типобезопасный клиент поверх сгенерированного; base URL, `Authorization: Bearer`, таймаут, `AbortController`, единый JSON-парсинг.
+- `shared/http`: `fetch`-обёртка с base URL, `Authorization: Bearer`, таймаутом, `AbortController`, единым JSON-парсингом и опциональной zod-валидацией ответа.
 - `shared/session`: обёртка над `expo-secure-store` для `auth_token`/`auth_profile` + Zustand-store (`token`, `profile`, `isAuthed`, `login()`, `logout()`).
 - Глобальный перехват `401` на любом авторизованном запросе: очистка сессии и установка `isAuthed=false` (навигация уходит на SCR-001 в `RootNavigator`) — LOGIC-001 AC-003.
 - `shared/errors`: маппер `ErrorResponse` → пользовательское сообщение (`reason`-коды: `invalid_credentials`, `slot_not_found`, `slot_unavailable`, `no_capacity`, `payment_failed`, `cancellation_not_allowed`, `unauthorized`, и т.д.).
 - Сквозные UI-состояния: `loading`, `error` (с кнопкой «Повторить»), `empty`; форматтеры дат/времени и цены в рублях (CON-009).
-- Русский словарь строк `shared/i18n/ru.ts`.
+- Русский словарь строк `shared/i18n/ru.js`.
 
 Готово, когда:
 - Unit-тесты: 401 на произвольном запросе сбрасывает сессию; маппер корректно переводит все `reason`-коды в текст.
@@ -216,7 +217,7 @@ mobile/
 - Тап по шефу → SCR-004; «Назад» → SCR-002.
 
 Готово, когда:
-- Тесты: успешчная загрузка; 410 скрывает кнопку записи; 404 показывает «Класс не найден».
+- Тесты: успешная загрузка; 410 скрывает кнопку записи; 404 показывает «Класс не найден».
 
 ### FE-06. Реализовать профиль шефа (SCR-004)
 
@@ -233,8 +234,8 @@ mobile/
 Сделать:
 - SCR-005: обязательный явный выбор экипировки (`own`/`rental`), по умолчанию `null` — кнопка «Продолжить к оплате» disabled (FR-008).
 - Доступность `rental`: если `availableRentalKits=0` — радио заблокировано с подписью «Прокатный фонд на этот класс исчерпан» (FR-009).
-- Локальный мгновенный расчёт стоимости без запросов к API (LOGIC-004): `own → slot.price`; `rental → slot.price + прокатная составляющая` (значение проката берётся из данных слота/бэкенда; FE не выдумывает поле — CON-001). Расшифровка и финальная сумма; авторитетная сумма — `payment.amount` из ответа `createBooking` (LOGIC-004, замечание о стоимости проката).
-- Блок аллергий только для чтения: предзаполнен из профиля иauto-подставляется бэкендом (FR-027, LOGIC-007). Ссылка на редактирование ведёт на SCR-012.
+- Локальный мгновенный расчёт стоимости без запросов к API (LOGIC-004): `own → slot.price`; `rental → slot.price + прокатная составляющая` (значение проката берётся из данных слота/бэкенда; FE не выдумывает поле — CON-001). Расшифровка и предварительная сумма; авторитетная финальная сумма — `payment.amount` из ответа `createBooking` (LOGIC-004, замечание о стоимости проката).
+- Блок аллергий только для чтения: отображается из профиля клиента и автоматически подставляется бэкендом в новую бронь (FR-027, LOGIC-007). Ссылка на редактирование ведёт на SCR-012.
 - Передача состояния `{ slotId, equipmentChoice }` на SCR-006.
 
 Готово, когда:
@@ -247,7 +248,7 @@ mobile/
 - SCR-006: ввод карты через платёжный SDK внешней инфраструктуры (CON-003/NFR-008), получение `cardToken`; синхронная оплата, без асинхронного ожидания/редиректов (NFR-005).
 - `POST /bookings` с телом `{ slotId, equipmentChoice, cardToken }` (аллергии НЕ передавать — бэкенд подставляет сам, FR-027). Блокировка UI и игнор повторных тапов на время запроса (FR-012).
 - Маппинг исходов на SCR-007: `201` → успех (показ `booking`/`payment`, финальная сумма = `payment.amount`); `402 payment_failed` → экран ошибки оплаты («Повторить оплату»); `409 no_capacity` → «место занято» («Выбрать другой класс»); `410 slot_unavailable` → «запись закрыта»; `404 slot_not_found` → «класс не найден»; `401` → SCR-001 (через LOGIC-001); `5xx/сеть` → error state с «Повторить» и разблокировкой UI.
-- SCR-007: три варианта экрана результата; для успеха — переходы «На мои брони» (SCR-008) и «В расписание» (SCR-002).
+- SCR-007: варианты экрана результата; для успеха — переходы «На мои брони» (SCR-008) и «В расписание» (SCR-002).
 - Повторная попытка оплаты — только по явному тапу пользователя, без авто-ретраев (NFR-016).
 
 Готово, когда:
@@ -273,7 +274,7 @@ mobile/
 - Отображение статуса «Отменена студией» с причиной (FR-017); кнопка отмены скрыта для отменённых броней.
 
 Готово, когда:
-- Покрыты AC LOGIC-006; границы 10 минут проверены тестами UI (10:01 — доступно, 09:59 — скрыто).
+- Покрыты AC LOGIC-006; границы 10 минут проверены тестами UI (10:01 до старта — доступно, 09:59 — скрыто).
 - Тест: успешная отмена переводит оплату в `refunded` на экране.
 
 ### FE-11. Реализовать историю классов (SCR-010)
@@ -320,7 +321,7 @@ mobile/
 
 Сделать:
 - Свести `reason`-коды ошибок к единому маппингу и пользовательским текстам; гарантировать JSON-формат ошибок и корректные статус-коды на экранах.
-- Валидация форм (login, профиль) через zod-схемы, согласованные с сгенерированными типами.
+- Валидация форм (login, профиль) через zod-схемы, согласованные с OpenAPI-контрактом.
 - Единые loading/error/empty/refetch для всех списков и деталей; оффлайн/нет сети — снек с «Повторить».
 - Проверка, что ни один экран не кэширует `available_seats`/`availableRentalKits` между экранами дольше текущего ответа (NFR-015).
 
@@ -333,7 +334,7 @@ mobile/
 Сделать:
 - Component-тесты (RNTL) для всех экранов: auth, schedule, slot, chef, booking-setup, payment/result, my-bookings, booking-details/cancel, history, rating, profile.
 - Тесты хуков/мапперов: session, error-mapper, форматтеры, LOGIC-004 (расчёт стоимости), локальные пороги LOGIC-006.
-- e2e (Detox/Playwright) ключевых потоков на mock-сервере: login → schedule → slot → booking-setup → payment (201) → result → my-bookings → cancel; rating; profile/allergies; глобальный 401.
+- e2e (Detox/Maestro) ключевых потоков на mock-сервере: login → schedule → slot → booking-setup → payment (201) → result → my-bookings → cancel; rating; profile/allergies; глобальный 401.
 
 Готово, когда:
 - `npm test` проходит стабильно; e2e-сценарии green на CI.
@@ -341,7 +342,7 @@ mobile/
 ### FE-17. Подготовить локальный запуск и документацию разработчика
 
 Сделать:
-- `mobile/README.md`: setup, env, codegen, mock-сервер, run iOS/Android, тесты, e2e, сборка через EAS.
+- `mobile/README.md`: setup, env, mock-сервер, синхронизация клиента с контрактом, run iOS/Android, тесты, e2e, сборка через EAS.
 - `.env.example` без секретов; инструкция по подключению платёжного SDK и push.
 - Описать, что справочные данные (программы/шефы/слоты) поступают только из API (CON-001).
 
@@ -351,8 +352,8 @@ mobile/
 ### FE-18. Финальная проверка готовности FE
 
 Сделать:
-- Прогнать lint OpenAPI-контракта и перегенерацию типов.
-- Прогнать `lint`, `typecheck`, `npm test`, e2e.
+- Прогнать lint OpenAPI-контракта и актуальность mock/клиента относительно него.
+- Прогнать `lint`, `npm test`, e2e.
 - Сверить реализованные экраны с таблицей endpoints и ТЗ `01-analysis/5-mobile-app-spec/*.md` (SCR-001…SCR-012, LOGIC-001…LOGIC-008).
 - Проверить сквозные требования: обязательный login без гостевого режима (FR-001), атомарность и порог 10 минут обрабатываются бэкендом (CON-002/006), аллергии автоподставляются (FR-027), отзывы неизменяемы (FR-024), синхронная оплата без авто-ретраев (NFR-005/016).
 
