@@ -1,0 +1,785 @@
+openapi: 3.0.0
+info:
+  title: Кулинарная студия — API клиентского приложения
+  description: |
+    API для мобильного клиентского приложения кулинарной студии.
+    Единственная роль — Клиент. Все операции требуют аутентификации,
+    кроме `/auth/login`.
+  version: 1.0.0
+  contact:
+    name: Команда разработки
+
+servers:
+  - url: https://api.studio.example.com/v1
+    description: Production-сервер (пример)
+
+tags:
+  - name: auth
+    description: Аутентификация клиента
+  - name: slots
+    description: Расписание и детали классов
+  - name: chefs
+    description: Профили шефов
+  - name: bookings
+    description: Бронирование, управление бронями, история
+  - name: notifications
+    description: Полученные push-уведомления (только чтение)
+  - name: profile
+    description: Профиль клиента (аллергии)
+
+paths:
+  /auth/login:
+    post:
+      tags:
+        - auth
+      summary: Вход в приложение
+      description: Первый экран, обязательная авторизация для доступа ко всем остальным данным.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - login
+                - password
+              properties:
+                login:
+                  type: string
+                  description: Логин клиента (выдаётся студией)
+                  example: "ivanov@example.com"
+                password:
+                  type: string
+                  description: Пароль клиента
+                  example: "secret123"
+      responses:
+        '200':
+          description: Успешный вход
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: Токен для Bearer-аутентификации
+                    example: "eyJhbGciOiJIUzI1NiIs..."
+                  user:
+                    $ref: '#/components/schemas/ClientProfile'
+        '401':
+          description: Неверные учётные данные
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                reason: "invalid_credentials"
+                message: "Неверный логин или пароль"
+
+  /slots:
+    get:
+      tags:
+        - slots
+      summary: Список доступных слотов
+      description: |
+        Возвращает слоты на заданный временной горизонт (по умолчанию 7 дней).
+        Поддерживается расширение диапазона через параметры дат.
+      operationId: getSlots
+      parameters:
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Начальная дата (включительно) в формате YYYY-MM-DD
+          example: "2026-07-01"
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Конечная дата (включительно) в формате YYYY-MM-DD
+          example: "2026-07-07"
+      responses:
+        '200':
+          description: Список слотов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Slot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+  /slots/{slotId}:
+    get:
+      tags:
+        - slots
+      summary: Детали конкретного слота
+      description: Полная информация о классе перед записью.
+      operationId: getSlotById
+      parameters:
+        - name: slotId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Идентификатор слота
+      responses:
+        '200':
+          description: Детали слота
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Slot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Слот не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                reason: "slot_not_found"
+                message: "Класс не найден"
+        '410':
+          description: Слот существует, но недоступен для записи (отменён, завершён, менее 10 минут до старта)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                reason: "slot_unavailable"
+                message: "Запись на этот класс закрыта"
+      security:
+        - bearerAuth: []
+
+  /chefs/{chefId}:
+    get:
+      tags:
+        - chefs
+      summary: Профиль шефа
+      description: Возвращает информацию о шефе, включая агрегированный рейтинг и список отзывов.
+      operationId: getChef
+      parameters:
+        - name: chefId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Идентификатор шефа
+      responses:
+        '200':
+          description: Профиль шефа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chef'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Шеф не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+
+  /chefs/{chefId}/slots:
+    get:
+      tags:
+        - chefs
+      summary: Актуальные слоты данного шефа
+      description: Другие доступные для записи классы, которые ведёт этот шеф.
+      operationId: getChefSlots
+      parameters:
+        - name: chefId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Список слотов шефа
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Slot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+  /notifications:
+    get:
+      tags:
+        - notifications
+      summary: Список полученных push-уведомлений
+      description: |
+        Возвращает все push-уведомления, отправленные текущему клиенту.
+        Сортировка по убыванию даты (самые свежие первыми).
+        Клиент только читает уведомления – изменения (прочтение/удаление) не предусмотрены.
+      operationId: getNotifications
+      responses:
+        '200':
+          description: Список уведомлений
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+  /bookings:
+    post:
+      tags:
+        - bookings
+      summary: Создание брони (с оплатой)
+      description: |
+        Атомарное бронирование с синхронной оплатой.
+        Обрабатывает гонки, порог 10 минут до старта, несуществующие слоты.
+      operationId: createBooking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - slotId
+                - equipmentChoice
+                - cardToken
+              properties:
+                slotId:
+                  type: string
+                  format: uuid
+                  description: ID слота, на который клиент записывается
+                equipmentChoice:
+                  type: string
+                  enum: [own, rental]
+                  description: 'own – своя экипировка, rental – прокатная'
+                cardToken:
+                  type: string
+                  description: Токен карты, полученный через платёжную инфраструктуру
+      responses:
+        '201':
+          description: Бронь успешно создана, оплата проведена
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: '#/components/schemas/Booking'
+                  payment:
+                    $ref: '#/components/schemas/Payment'
+        '402':
+          description: Ошибка оплаты (платёж не прошёл)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                reason: "payment_failed"
+                message: "Ошибка оплаты, попробуйте снова"
+        '404':
+          description: Слот не существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                reason: "slot_not_found"
+                message: "Класс не найден"
+        '409':
+          description: Конфликт – место или прокатный набор уже заняты (гонка)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                reason: "no_capacity"
+                message: "Место уже занято, выберите другой слот"
+        '410':
+          description: Слот недоступен как ресурс (порог времени, отменён студией, завершён)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                reason: "slot_unavailable"
+                message: "Запись на этот класс закрыта"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+    get:
+      tags:
+        - bookings
+      summary: Список активных броней клиента
+      description: Возвращает все брони в статусе `active` (предстоящие классы).
+      operationId: getMyBookings
+      responses:
+        '200':
+          description: Список активных броней (сортировка по дате, ближайшая первой)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+  /bookings/history:
+    get:
+      tags:
+        - bookings
+      summary: История завершённых классов
+      description: Брони со статусом `completed` (слот завершён) или отменённые, но только прошедшие.
+      operationId: getBookingHistory
+      responses:
+        '200':
+          description: Список завершённых броней (хронологический порядок, от последнего к раннему)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+  /bookings/{bookingId}:
+    get:
+      tags:
+        - bookings
+      summary: Детали конкретной брони
+      description: Полная информация о брони, включая статус оплаты и аллергии.
+      operationId: getBookingById
+      parameters:
+        - name: bookingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Детали брони
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Бронь не найдена или не принадлежит клиенту
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+
+  /bookings/{bookingId}/cancel:
+    post:
+      tags:
+        - bookings
+      summary: Отмена брони клиентом
+      description: |
+        Отменяет бронь, если до начала класса более 10 минут.
+        Автоматически инициирует возврат средств (статус оплаты → refunded).
+      operationId: cancelBooking
+      parameters:
+        - name: bookingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Бронь успешно отменена, оплата возвращена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Бронь не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Отмена невозможна (менее 10 минут до начала)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                reason: "cancellation_not_allowed"
+                message: "Отмена брони доступна не позднее чем за 10 минут до начала класса"
+      security:
+        - bearerAuth: []
+
+  /bookings/{bookingId}/rating:
+    post:
+      tags:
+        - bookings
+      summary: Оставить оценку и отзыв по завершённому классу
+      description: |
+        Создаёт отзыв для завершённой брони. Оценка обязательна, текст опционален.
+        После отправки редактирование невозможно.
+      operationId: createRating
+      parameters:
+        - name: bookingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - rating
+              properties:
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                  description: Оценка звёздами (1–5)
+                comment:
+                  type: string
+                  description: Текстовый отзыв (опционально)
+      responses:
+        '201':
+          description: Отзыв успешно сохранён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rating'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Бронь не найдена или не завершена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Отзыв уже оставлен для этой брони
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+
+  /profile:
+    get:
+      tags:
+        - profile
+      summary: Получить профиль клиента
+      description: Возвращает текущие аллергии и базовые данные клиента.
+      operationId: getProfile
+      responses:
+        '200':
+          description: Профиль клиента
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+    patch:
+      tags:
+        - profile
+      summary: Обновить профиль клиента (аллергии)
+      description: Изменяет список аллергий, которые будут автоматически подставляться в новые брони.
+      operationId: updateProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                allergies:
+                  type: array
+                  items:
+                    type: string
+                  description: Список аллергий (например, ["орехи", "глютен"])
+      responses:
+        '200':
+          description: Профиль обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Токен, полученный при логине
+
+  responses:
+    Unauthorized:
+      description: Отсутствует или недействительный токен
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            reason: "unauthorized"
+            message: "Требуется авторизация"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Кодовое обозначение ошибки
+          example: "slot_not_found"
+        message:
+          type: string
+          description: Человекочитаемое сообщение для пользователя
+          example: "Класс не найден"
+
+    Program:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Название программы (тема класса)
+        description:
+          type: string
+          description: Описание программы (текст)
+        requiresOven:
+          type: boolean
+          description: Влияет на вместимость (не показывается клиенту, но влияет на max_seats)
+
+    Chef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        photoUrl:
+          type: string
+          format: uri
+        rating:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 5
+          description: Агрегированный рейтинг (среднее)
+        reviews:
+          type: array
+          items:
+            $ref: '#/components/schemas/Review'
+
+    Review:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        clientName:
+          type: string
+          description: Имя клиента, оставившего отзыв (может быть анонимно, но по желанию)
+
+    Slot:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        program:
+          $ref: '#/components/schemas/Program'
+        chef:
+          $ref: '#/components/schemas/Chef'
+        startsAt:
+          type: string
+          format: date-time
+          description: Дата и время начала класса
+        durationMinutes:
+          type: integer
+          description: Длительность класса в минутах
+        maxSeats:
+          type: integer
+          description: Максимальная вместимость слота (зависит от программы)
+        availableSeats:
+          type: integer
+          description: Количество свободных мест на данный момент
+        status:
+          type: string
+          enum: [scheduled, cancelled_by_studio, in_progress, completed]
+          description: Текущий статус слота
+        price:
+          type: number
+          format: float
+          description: Стоимость участия
+        availableRentalKits:
+          type: integer
+          description: Количество доступных прокатных комплектов в этом слоте
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [confirmation, reminder, studio_cancellation]
+          description: Тип уведомления (подтверждение записи, напоминание, отмена студией)
+        message:
+          type: string
+          description: Текст уведомления
+        createdAt:
+          type: string
+          format: date-time
+        bookingId:
+          type: string
+          format: uuid
+          description: ID брони, к которой относится уведомление (если применимо)
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: float
+        status:
+          type: string
+          enum: [paid, refunded]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slotId:
+          type: string
+          format: uuid
+        slot:
+          $ref: '#/components/schemas/Slot'
+        status:
+          type: string
+          enum: [active, cancelled_by_client, cancelled_by_studio]
+          description: |
+            active – подтверждённая бронь,
+            cancelled_by_client – отменена клиентом,
+            cancelled_by_studio – отменена студией (с возвратом)
+        equipmentChoice:
+          type: string
+          enum: [own, rental]
+        allergies:
+          type: array
+          items:
+            type: string
+          description: Список аллергий, зафиксированных в этой брони (из профиля на момент создания)
+        payment:
+          $ref: '#/components/schemas/Payment'
+        createdAt:
+          type: string
+          format: date-time
+
+    Rating:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        bookingId:
+          type: string
+          format: uuid
+        chefId:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ClientProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        login:
+          type: string
+          description: Логин клиента (выдаётся студией)
+        allergies:
+          type: array
+          items:
+            type: string
+          description: Список аллергий клиента, подставляемый в новые брони
