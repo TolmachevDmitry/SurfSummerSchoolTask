@@ -1,0 +1,22 @@
+# Зависимости
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Локальное окружение
+.env
+.env.local
+
+# Сборки
+ios/
+android/
+
+# Кэш
+*.log
+.DS_Store
+coverage/
+.expo-shared/
+
+# Среды
+.idea
